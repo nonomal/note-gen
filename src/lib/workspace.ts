@@ -1,6 +1,31 @@
 import { BaseDirectory } from '@tauri-apps/plugin-fs'
-import { join } from '@tauri-apps/api/path'
+import { appDataDir, join } from '@tauri-apps/api/path'
 import { Store } from '@tauri-apps/plugin-store'
+
+function normalizeFsPath(path: string): string {
+  return path.trim().replace(/\\/g, '/').replace(/\/+/g, '/')
+}
+
+function isWindowsLikePath(path: string): boolean {
+  return /^[a-zA-Z]:\//.test(path) || path.startsWith('//')
+}
+
+let runtimeWorkspace: { path: string; isCustom: boolean } | null = null
+
+/**
+ * Pins workspace-dependent helpers to one absolute root in the current webview.
+ * Standalone editor windows use this without changing the persisted main-window workspace.
+ */
+export function setRuntimeWorkspaceRoot(path: string | null, isCustom = true): void {
+  const normalizedPath = path?.trim()
+  runtimeWorkspace = normalizedPath
+    ? { path: isCustom ? normalizedPath : 'article', isCustom }
+    : null
+}
+
+export function isAbsoluteFsPath(path: string): boolean {
+  return path.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith('\\\\')
+}
 
 /**
  * 获取当前工作区路径
@@ -8,22 +33,26 @@ import { Store } from '@tauri-apps/plugin-store'
  * 否则返回默认的 AppData/article 路径
  */
 export async function getWorkspacePath(): Promise<{ path: string, isCustom: boolean }> {
+  if (runtimeWorkspace) {
+    return runtimeWorkspace
+  }
+
   // 查询本地存储
   const store = await Store.load('store.json')
   const workspacePath = await store.get<string>('workspacePath')
-  
+
   // 如果设置了自定义工作区路径，则使用自定义路径
   if (workspacePath) {
-    return { 
+    return {
       path: workspacePath,
-      isCustom: true 
+      isCustom: true
     }
   }
-  
+
   // 否则使用默认路径
-  return { 
-    path: 'article', 
-    isCustom: false 
+  return {
+    path: 'article',
+    isCustom: false
   }
 }
 
@@ -33,19 +62,39 @@ export async function getWorkspacePath(): Promise<{ path: string, isCustom: bool
  * @returns 包含文件路径和baseDir的选项
  */
 export async function getFilePathOptions(relativePath: string): Promise<{ path: string, baseDir?: BaseDirectory }> {
+  if (isAbsoluteFsPath(relativePath)) {
+    return { path: relativePath }
+  }
+
   const workspace = await getWorkspacePath()
-  
+
   if (workspace.isCustom) {
     // 对于自定义工作区，返回绝对路径，不设置baseDir
     const fullPath = await join(workspace.path, relativePath)
     return { path: fullPath }
   } else {
     // 对于默认工作区，使用AppData作为baseDir
-    return { 
-      path: `article/${relativePath}`, 
-      baseDir: BaseDirectory.AppData 
+    const resolvedPath = `article/${relativePath}`
+    return {
+      path: resolvedPath,
+      baseDir: BaseDirectory.AppData
     }
   }
+}
+
+/**
+ * 获取默认 AppData/article 下的绝对路径
+ * 主要用于 skills/runtime、outputs 等特殊目录，避免某些 baseDir 写入限制
+ */
+export async function getDefaultArticleAbsolutePath(relativePath: string): Promise<string> {
+  const normalized = relativePath
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.?\//, '')
+    .replace(/^article\//, '')
+
+  const appDataPath = await appDataDir()
+  return await join(appDataPath, 'article', normalized)
 }
 
 /**
@@ -98,17 +147,73 @@ export async function toWorkspaceRelativePath(path: string): Promise<string> {
   const defaultDirRegex = /^(article[\\\/])/
   // 如果是默认工作区，移除"article/"前缀
   if (!workspace.isCustom && defaultDirRegex.test(path)) {
-    return path.replace(/article[\\\/]/g, '')
+    return path.replace(defaultDirRegex, '')
   }
   
   // 如果是自定义工作区，移除工作区路径前缀
-  if (workspace.isCustom && path.startsWith(workspace.path)) {
+  const normalizedPath = normalizeFsPath(path)
+  const normalizedWorkspacePath = normalizeFsPath(workspace.path).replace(/\/$/, '')
+  const comparePath = isWindowsLikePath(normalizedPath) ? normalizedPath.toLowerCase() : normalizedPath
+  const compareWorkspacePath = isWindowsLikePath(normalizedWorkspacePath)
+    ? normalizedWorkspacePath.toLowerCase()
+    : normalizedWorkspacePath
+  if (workspace.isCustom && (
+    comparePath === compareWorkspacePath ||
+    comparePath.startsWith(`${compareWorkspacePath}/`)
+  )) {
     // 确保路径分隔符处理正确
-    const relativePath = path.substring(workspace.path.length)
+    const relativePath = normalizedPath.substring(normalizedWorkspacePath.length)
     // 移除开头的斜杠（如果有）
     return relativePath.startsWith('/') ? relativePath.substring(1) : relativePath
   }
   
   // 如果路径已经是相对路径，直接返回
   return path
+}
+
+/**
+ * 规范化相对于工作区的路径
+ * - 自定义工作区: 保持相对路径原样
+ * - 默认工作区(article): 自动移除误传入的 article/ 前缀
+ */
+export async function normalizeWorkspaceRelativePath(relativePath: string): Promise<string> {
+  const workspace = await getWorkspacePath()
+  const normalized = relativePath
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.?\//, '')
+    .replace(/\/+/g, '/')
+
+  if (workspace.isCustom) {
+    return normalized
+  }
+
+  if (normalized === 'article') {
+    return ''
+  }
+
+  return normalized.replace(/^article\//, '')
+}
+
+/**
+ * 确保路径是安全的、相对于工作区的路径。
+ * Agent 文件工具应在执行读写前调用此函数，避免越过工作区根目录。
+ */
+export async function ensureSafeWorkspaceRelativePath(relativePath: string): Promise<string> {
+  const normalized = await normalizeWorkspaceRelativePath(relativePath)
+
+  if (!normalized) {
+    throw new Error('路径不能为空')
+  }
+
+  if (normalized.startsWith('/')) {
+    throw new Error('不允许使用绝对路径')
+  }
+
+  const segments = normalized.split('/').filter(Boolean)
+  if (segments.some(segment => segment === '..')) {
+    throw new Error('路径不能包含 ..')
+  }
+
+  return normalized
 }

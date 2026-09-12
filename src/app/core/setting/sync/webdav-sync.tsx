@@ -1,162 +1,203 @@
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { FormItem, SettingRow } from "../components/setting-base";
-import { useEffect } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Upload, Download, LoaderCircle } from "lucide-react";
-import useWebDAVStore, { WebDAVConnectionState } from "@/stores/webdav";
-import { toast } from "@/hooks/use-toast";
+'use client';
 
-export default function WebdavSync() {
-  const { 
-    url, setUrl,
-    username, setUsername,
-    password, setPassword,
-    path, setPath,
-    connectionState, 
-    backupToWebDAV,
-    syncFromWebDAV,
-    initWebDAVData,
-    syncState,
-    backupState
-  } = useWebDAVStore();
+import { useState, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Eye, EyeOff, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { testWebDAVConnection } from '@/lib/sync/webdav';
+import { WebDAVConfig } from '@/types/sync';
+import { Store } from '@tauri-apps/plugin-store';
+import useSyncStore from '@/stores/sync';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { InputGroup, InputGroupButton, InputGroupInput } from '@/components/ui/input-group';
+import { Item, ItemActions, ItemContent, ItemTitle } from '@/components/ui/item';
 
+export function WebDAVSync() {
+  const t = useTranslations();
+  const { webdavConnected, setWebDAVConnected } = useSyncStore();
+
+  const [config, setConfig] = useState<WebDAVConfig>({
+    url: '',
+    username: '',
+    password: '',
+    pathPrefix: ''
+  });
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  // 初始化配置
   useEffect(() => {
-    initWebDAVData();
+    const initConfig = async () => {
+      try {
+        const store = await Store.load('store.json');
+        const savedConfig = await store.get<WebDAVConfig>('webdavSyncConfig');
+        if (savedConfig) {
+          setConfig(savedConfig);
+          // 如果配置完整，自动进行连接检测
+          if (savedConfig.url && savedConfig.username && savedConfig.password) {
+            testConnection(savedConfig);
+          }
+        }
+      } finally {
+        setIsInitialized(true);
+      }
+    };
+    initConfig();
   }, []);
 
-  const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setUrl(e.target.value);
+  // 测试连接
+  const testConnection = async (configToTest?: WebDAVConfig) => {
+    const testConfig = configToTest || config;
+    if (!testConfig.url || !testConfig.username || !testConfig.password) {
+      return;
+    }
+
+    setIsConnecting(true);
+    try {
+      const isConnected = await testWebDAVConnection(testConfig);
+      setWebDAVConnected(isConnected);
+    } catch (error) {
+      console.error('WebDAV connection test failed:', error);
+      setWebDAVConnected(false);
+    } finally {
+      setIsConnecting(false);
+    }
   };
 
-  const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setUsername(e.target.value);
+  // 配置变更后自动保存，避免输入过程中频繁写入磁盘
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const store = await Store.load('store.json');
+        await store.set('webdavSyncConfig', config);
+        await store.save();
+      } catch (error) {
+        console.error('Failed to auto-save WebDAV config:', error);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [config, isInitialized]);
+
+  // 配置变更处理
+  const handleConfigChange = (key: keyof WebDAVConfig, value: string) => {
+    setConfig(prev => ({ ...prev, [key]: value }));
+    setWebDAVConnected(false);
   };
 
-  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPassword(e.target.value);
+  const getStatusIcon = () => {
+    if (isConnecting) {
+      return <Loader2 className="size-4 animate-spin text-blue-500" />;
+    }
+    if (webdavConnected) {
+      return <CheckCircle className="size-4 text-green-500" />;
+    }
+    return <XCircle className="size-4 text-red-500" />;
   };
 
-  const handlePathChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPath(e.target.value);
-  };
-
-  const handleBackupToWebDAV = async () => {
-    const res = await backupToWebDAV();
-    toast({
-      title: "备份成功",
-      description: `已备份 ${res} 个文件至 WebDAV。`,
-    });
-  };
-
-  const handleSyncFromWebDAV = async () => {
-    const res = await syncFromWebDAV();
-    toast({
-      title: "同步成功",
-      description: `已从 WebDAV 同步至本地 ${res} 个文件。`,
-    });
+  const getStatusText = () => {
+    if (isConnecting) {
+      return t('settings.sync.webdav.connecting');
+    }
+    if (webdavConnected) {
+      return t('settings.sync.webdav.connected');
+    }
+    return t('settings.sync.webdav.disconnected');
   };
 
   return (
-    <>
-      <SettingRow>
-        <FormItem title="">
-          <div className="flex items-center space-x-4">
-            <Card className="flex-1">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-4">
-                  <span className="text-base font-bold">WebDAV</span>
-                  <Badge 
-                    className={`${
-                      connectionState === WebDAVConnectionState.success 
-                        ? 'bg-green-800' 
-                        : connectionState === WebDAVConnectionState.checking 
-                          ? 'bg-yellow-800' 
-                          : 'bg-red-800'
-                    }`}
-                  >
-                    {connectionState}
-                  </Badge>
-                </CardTitle>
-                <CardDescription>WebDAV 仅作为备用备份方案，不支持自动同步、历史回滚等功能。</CardDescription>
-              </CardHeader>
-              <CardContent className="flex gap-4">
-                <Button 
-                  onClick={handleBackupToWebDAV} 
-                  variant="outline" 
-                  className="mt-2"
-                  disabled={backupState || syncState}
-                >
-                  {
-                    backupState ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : (
-                      <Upload />
-                    )
-                  }
-                  备份至 WebDAV
-                </Button>
-                <Button 
-                  onClick={handleSyncFromWebDAV} 
-                  variant="outline" 
-                  className="mt-2"
-                  disabled={syncState || backupState}
-                >
-                  {
-                    syncState ? (
-                      <LoaderCircle className="animate-spin" />
-                    ) : (
-                      <Download />
-                    )
-                  }
-                  从 WebDAV 同步
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </FormItem>
-      </SettingRow>
-      <SettingRow>
-        <FormItem title="WebDAV 服务器地址" desc="输入WebDAV服务器的URL，例如：https://dav.example.com">
-          <Input 
-            value={url} 
-            onChange={handleUrlChange} 
-            placeholder="https://dav.example.com"
-          />
-        </FormItem>
-      </SettingRow>
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('settings.sync.webdav.title')}</CardTitle>
+        <CardDescription>{t('settings.sync.webdav.description')}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <FieldGroup>
+          <Item variant="muted">
+            <ItemContent>
+              <ItemTitle>{t('settings.sync.webdav.status')}</ItemTitle>
+            </ItemContent>
+            <ItemActions>
+              {getStatusIcon()}
+              <span className="text-sm">{getStatusText()}</span>
+            </ItemActions>
+          </Item>
 
-      <SettingRow>
-        <FormItem title="用户名" desc="WebDAV服务器的用户名">
-          <Input 
-            value={username} 
-            onChange={handleUsernameChange} 
-            placeholder="用户名"
-          />
-        </FormItem>
-      </SettingRow>
-
-      <SettingRow>
-        <FormItem title="密码" desc="WebDAV服务器的密码">
-          <Input 
-            value={password} 
-            onChange={handlePasswordChange} 
-            type="password" 
-            placeholder="密码"
-          />
-        </FormItem>
-      </SettingRow>
-
-      <SettingRow>
-        <FormItem title="备份路径" desc="WebDAV服务器上的备份路径，例如：/backup/notes">
-          <Input 
-            value={path} 
-            onChange={handlePathChange} 
-            placeholder="/backup/notes"
-          />
-        </FormItem>
-      </SettingRow>
-    </>
+          <Field>
+            <FieldLabel htmlFor="url">{t('settings.sync.webdav.url')}</FieldLabel>
+            <Input
+              id="url"
+              type="text"
+              value={config.url}
+              onChange={(e) => handleConfigChange('url', e.target.value)}
+              placeholder={t('settings.sync.webdav.urlPlaceholder')}
+            />
+            <FieldDescription>{t('settings.sync.webdav.urlDesc')}</FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="username">{t('settings.sync.webdav.username')}</FieldLabel>
+            <Input
+              id="username"
+              type="text"
+              value={config.username}
+              onChange={(e) => handleConfigChange('username', e.target.value)}
+              placeholder={t('settings.sync.webdav.usernamePlaceholder')}
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="password">{t('settings.sync.webdav.password')}</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="password"
+                type={showPassword ? "text" : "password"}
+                value={config.password}
+                onChange={(e) => handleConfigChange('password', e.target.value)}
+                placeholder={t('settings.sync.webdav.passwordPlaceholder')}
+              />
+              <InputGroupButton
+                size="icon-xs"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                onClick={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </InputGroupButton>
+            </InputGroup>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="pathPrefix">{t('settings.sync.webdav.pathPrefix')}</FieldLabel>
+            <Input
+              id="pathPrefix"
+              type="text"
+              value={config.pathPrefix || ''}
+              onChange={(e) => handleConfigChange('pathPrefix', e.target.value)}
+              placeholder={t('settings.sync.webdav.pathPrefixPlaceholder')}
+            />
+            <FieldDescription>{t('settings.sync.webdav.pathPrefixDesc')}</FieldDescription>
+          </Field>
+        </FieldGroup>
+      </CardContent>
+      <CardFooter className="gap-2">
+          <Button
+            variant="outline"
+            onClick={() => testConnection()}
+            disabled={isConnecting || !config.url || !config.username || !config.password}
+          >
+            {isConnecting ? (
+              <>
+                <Loader2 data-icon="inline-start" className="animate-spin" />
+                {t('settings.sync.webdav.testing')}
+              </>
+            ) : (
+              t('settings.sync.webdav.testConnection')
+            )}
+          </Button>
+      </CardFooter>
+    </Card>
   );
 }

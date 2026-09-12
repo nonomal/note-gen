@@ -4,7 +4,9 @@
   "description": "Capability for the main window",
   "windows": [
     "main",
-    "screenshot"
+    "screenshot",
+    "pdf-print-*",
+    "editor-*"
   ],
   "permissions": [
     "core:default",
@@ -28,6 +30,9 @@
         },
         {
           "path": "$APPDATA/**"
+        },
+        {
+          "path": "**"
         }
       ]
     },
@@ -40,6 +45,8 @@
       ]
     },
     "fs:allow-exists",
+    "fs:allow-watch",
+    "fs:allow-unwatch",
     {
       "identifier": "fs:allow-mkdir",
       "allow": [
@@ -85,24 +92,17 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-size",
     "core:window:allow-set-position",
+    "core:window:allow-set-title",
     "core:window:allow-hide",
     "core:window:allow-show",
     "core:window:allow-destroy",
     "core:path:allow-resolve-directory",
     "shell:default",
-    "core:window:allow-start-dragging",
-    "global-shortcut:default",
-    "global-shortcut:allow-register",
-    "global-shortcut:allow-register-all",
-    "global-shortcut:allow-is-registered",
-    "global-shortcut:allow-unregister",
-    "global-shortcut:allow-unregister-all",
-    "clipboard:allow-read-image-base64",
-    "clipboard:read-all",
-    "clipboard:allow-clear",
-    "clipboard:allow-write-text",
-    "clipboard:allow-start-monitor",
     "core:app:allow-default-window-icon",
+    "core:window:allow-unminimize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-set-always-on-top",
     {
       "identifier": "http:allow-fetch",
       "allow": [
@@ -120,6 +120,19 @@
         }
       ]
     },
-    "os:default"
+    "os:default",
+    "dialog:default",
+    "http:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    },
+    "opener:default",
+    "opener:allow-open-url",
+    "clipboard-manager:allow-write-text"
   ]
 }

@@ -1,54 +1,34 @@
-import { FormItem, SettingRow, SettingType } from "../components/setting-base";
+import { Item, ItemGroup, ItemMedia, ItemContent, ItemTitle, ItemDescription, ItemActions } from '@/components/ui/item';
 import { useTranslations } from 'next-intl';
-import { ModelSelect } from "./model-select";
-import useSettingStore from "@/stores/setting";
+import { ModelSelect } from "../components/model-select";
+import { Highlighter } from "lucide-react";
 
-export function Setting({id, icon}: {id: string, icon?: React.ReactNode}) {
+export function Setting() {
   const t = useTranslations('settings.defaultModel');
-  const { model, aiType } = useSettingStore()
 
   const options = [
     {
       title: t('options.markDesc.title'),
       desc: t('options.markDesc.desc'),
-      modelKey: 'markDesc'
-    },
-    {
-      title: t('options.placeholder.title'),
-      desc: t('options.placeholder.desc'),
-      modelKey: 'placeholder'
-    },
-    {
-      title: t('options.translate.title'),
-      desc: t('options.translate.desc'),
-      modelKey: 'translate'
-    },
-    {
-      title: t('options.embedding.title'),
-      desc: t('options.embedding.desc'),
-      modelKey: 'embedding'
-    },
-    {
-      title: t('options.reranking.title'),
-      desc: t('options.reranking.desc'),
-      modelKey: 'reranking'
+      modelKey: 'markDesc',
+      icon: <Highlighter className="size-4" />
     },
   ]
 
   return (
-    <SettingType id={id} icon={icon} title={t('title')} desc={t('desc')}>
-      <SettingRow>
-        <FormItem title={t('mainModel')}>
-          <p>{`${model}(${aiType})`}</p>
-        </FormItem>
-      </SettingRow>
+    <ItemGroup className="gap-4">
       {options.map((option) => (
-        <SettingRow key={option.modelKey}>
-          <FormItem title={option.title} desc={option.desc}>
-            <ModelSelect modelKey={option.modelKey} />
-          </FormItem>
-        </SettingRow>
+      <Item key={option.modelKey} variant="outline">
+        <ItemMedia variant="icon">{option.icon}</ItemMedia>
+        <ItemContent>
+          <ItemTitle>{option.title}</ItemTitle>
+          <ItemDescription>{option.desc}</ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <ModelSelect modelKey={option.modelKey} />
+        </ItemActions>
+      </Item>
       ))}
-    </SettingType>
+    </ItemGroup>
   )
 }

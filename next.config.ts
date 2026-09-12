@@ -18,6 +18,17 @@ const nextConfig: NextConfig = {
   },
   reactStrictMode: false,
   turbopack: {},
+  devIndicators: false,
 };
 
-export default withNextIntl(nextConfig);
+const configuredNext = withNextIntl(nextConfig);
+
+// next-intl 3.x still injects its Turbopack alias through the deprecated
+// experimental.turbo key. Normalize the plugin output for Next.js 15.3.
+const legacyTurbo = configuredNext.experimental?.turbo;
+if (legacyTurbo) {
+  configuredNext.turbopack = { ...legacyTurbo, ...configuredNext.turbopack };
+  if (configuredNext.experimental) delete configuredNext.experimental.turbo;
+}
+
+export default configuredNext;
